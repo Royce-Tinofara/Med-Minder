@@ -1,4 +1,4 @@
-import { LayoutDashboard, Pill, Clock, Users, Stethoscope, Heart, User, BarChart3 } from "lucide-react";
+import { LayoutDashboard, Pill, Clock, Users, Stethoscope, Heart, User, BarChart3, MessageCircle } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useAuth } from "@/contexts/AuthContext";
@@ -21,7 +21,7 @@ const BottomNav = () => {
     if (effectiveProfile?.role === "caregiver") {
       return [
         { icon: Heart, label: "Care", path: "/caregiver-dashboard" },
-        { icon: Clock, label: "Reports", path: "/reminders" },
+        { icon: MessageCircle, label: "Chat", path: "/chat" },
       ];
     }
     return [

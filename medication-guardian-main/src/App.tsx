@@ -100,6 +100,7 @@ const App = () => {
                   <Route path="caregivers" element={<Caregivers />} />
                   <Route path="pharmacist" element={<PharmacistDashboard />} />
                   <Route path="caregiver-dashboard" element={<CaregiverDashboard />} />
+                  <Route path="chat" element={<Reminders />} />
                 </Route>
               </Route>
               

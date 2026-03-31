@@ -9,6 +9,8 @@ import {
   XCircle,
   Timer,
   Clock,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -83,7 +85,8 @@ const Reports = () => {
           dosage,
           times,
           instructions,
-          medication_id
+          medication_id,
+          medications(name)
         `)
         .eq("patient_id", userId)
         .eq("status", "active");
@@ -104,7 +107,7 @@ const Reports = () => {
       const monthStart = startOfMonth(selectedMonth);
       const monthEnd = endOfMonth(selectedMonth);
 
-      // First try fetching without the join, as a fallback
+      // Fetch reminder logs with related medication data
       const { data: logsData, error: logsError } = await supabase
         .from("reminder_logs")
         .select(`
@@ -114,7 +117,8 @@ const Reports = () => {
           actual_time,
           status,
           notes,
-          created_at
+          created_at,
+          patient_medications(id, dosage, medications(name))
         `)
         .eq("patient_id", userId)
         .gte("scheduled_time", monthStart.toISOString())
@@ -123,38 +127,15 @@ const Reports = () => {
 
       if (logsError) {
         console.error("Error fetching reminder logs:", logsError);
-        // Try with a simpler query
-        const { data: simpleLogsData, error: simpleError } = await supabase
-          .from("reminder_logs")
-          .select("*")
-          .eq("patient_id", userId);
-        
-        if (simpleError) {
-          console.error("Fallback also failed:", simpleError);
-          setLogs([]);
-        } else {
-          setLogs(simpleLogsData || []);
-        }
+        setLogs([]);
         setLoading(false);
         return;
       }
 
-      // Get medication details separately
-      const medicationIds = [...new Set((logsData || []).map((log) => log.medication_id))];
-      const { data: medsForLogs } = await supabase
-        .from("patient_medications")
-        .select("id, medications(name, dosage)")
-        .in("id", medicationIds);
-
-      const medsMap = new Map();
-      (medsForLogs || []).forEach((med: any) => {
-        medsMap.set(med.id, med.medications);
-      });
-
       const formattedLogs = (logsData || []).map((log: any) => ({
         ...log,
-        medication_name: medsMap.get(log.medication_id)?.name || "Unknown",
-        dosage: medsMap.get(log.medication_id)?.dosage || "",
+        medication_name: log.patient_medications?.medications?.name || "Unknown",
+        dosage: log.patient_medications?.dosage || "",
         route: "Oral",
         instructions: "-",
       }));
@@ -289,16 +270,16 @@ const Reports = () => {
         <div className="flex items-center justify-between">
           <button
             onClick={() => setSelectedMonth(new Date(selectedMonth.setMonth(selectedMonth.getMonth() - 1)))}
-            className="rounded-xl p-2 hover:bg-white/5"
+            className="rounded-xl p-2 hover:bg-white/5 transition-colors"
           >
-            <Calendar className="h-5 w-5 text-muted-foreground" />
+            <ChevronLeft className="h-5 w-5 text-muted-foreground" />
           </button>
           <h2 className="font-display text-lg font-semibold">{format(selectedMonth, "MMMM yyyy")}</h2>
           <button
             onClick={() => setSelectedMonth(new Date(selectedMonth.setMonth(selectedMonth.getMonth() + 1)))}
-            className="rounded-xl p-2 hover:bg-white/5"
+            className="rounded-xl p-2 hover:bg-white/5 transition-colors"
           >
-            <Calendar className="h-5 w-5 text-muted-foreground" />
+            <ChevronRight className="h-5 w-5 text-muted-foreground" />
           </button>
         </div>
       </motion.div>

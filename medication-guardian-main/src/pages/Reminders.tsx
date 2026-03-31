@@ -377,12 +377,19 @@ const Reminders = () => {
 
       console.log("Fetching history for user:", userId);
       
-      // Fetch history without nested joins to avoid PostgREST 400 error
+      // Fetch history with medication details through relationships
       const { data, error } = await (supabase as any)
         .from("reminder_logs")
-        .select(
-          `id, medication_id, scheduled_time, actual_time, status, notes, created_at`
-        )
+        .select(`
+          id,
+          medication_id,
+          scheduled_time,
+          actual_time,
+          status,
+          notes,
+          created_at,
+          patient_medications(id, dosage, medications(name))
+        `)
         .eq("patient_id", userId)
         .gte("scheduled_time", thirtyDaysAgo.toISOString())
         .order("scheduled_time", { ascending: false });
@@ -395,26 +402,12 @@ const Reminders = () => {
 
       console.log("History fetched successfully:", data?.length, "records");
 
-      // Get medication details separately if we have logs
+      // Format logs with medication details
       if (data && data.length > 0) {
-        const medicationIds = [...new Set(data.map((log) => log.medication_id))];
-        
-        // Fetch medication details in a separate query (not nested to avoid 400 error)
-        const { data: medsData } = await (supabase as any)
-          .from("patient_medications")
-          .select("id, medications(name, dosage)")
-          .in("id", medicationIds);
-
-        // Create a map for quick lookup
-        const medsMap = new Map();
-        (medsData || []).forEach((med: any) => {
-          medsMap.set(med.id, med.medications);
-        });
-
         const formattedLogs = (data || []).map((log: any) => ({
           ...log,
-          medication_name: medsMap.get(log.medication_id)?.name || "Unknown",
-          dosage: medsMap.get(log.medication_id)?.dosage || "",
+          medication_name: log.patient_medications?.medications?.name || "Unknown",
+          dosage: log.patient_medications?.dosage || "",
         }));
         setHistoryLogs(formattedLogs);
       } else {
@@ -828,34 +821,22 @@ const Reminders = () => {
         const { data: logs } = await (supabase as any)
           .from("reminder_logs")
           .select(
-            `id, patient_id, medication_id, scheduled_time, actual_time, status, created_at`
+            `id, patient_id, medication_id, scheduled_time, actual_time, status, created_at, patient_medications(id, dosage, quantity_remaining, total_quantity, medications(name))`
           )
           .in("patient_id", patientIds)
           .gte("scheduled_time", thirtyDaysAgo.toISOString())
           .order("scheduled_time", { ascending: false });
 
-        // Get medication details separately
-        const medicationIds = [...new Set((logs || []).map((log: any) => log.medication_id))];
-        const { data: medsData } = await (supabase as any)
-          .from("patient_medications")
-          .select("id, medications(name, dosage), quantity_remaining, total_quantity")
-          .in("id", medicationIds);
-
-        const medsMap = new Map();
-        (medsData || []).forEach((med: any) => {
-          medsMap.set(med.id, med);
-        });
-
         // Map patient names to logs
         const patientMap = new Map(assignments.map((a: any) => [a.patient_id, a.users?.first_name + " " + a.users?.last_name]));
         
         const formattedLogs = (logs || []).map((log: any) => {
-          const medData = medsMap.get(log.medication_id);
+          const medData = log.patient_medications;
           return {
             ...log,
             patient_name: patientMap.get(log.patient_id) || "Unknown",
             medication_name: medData?.medications?.name || "Unknown",
-            dosage: medData?.medications?.dosage || "",
+            dosage: medData?.dosage || "",
             quantity_remaining: medData?.quantity_remaining || 0,
             total_quantity: medData?.total_quantity || 0,
           };

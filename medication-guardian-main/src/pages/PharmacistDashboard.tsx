@@ -84,24 +84,11 @@ const PharmacistDashboard = () => {
         .select("id, first_name, last_name")
         .in("id", patientIds);
 
-      // Get medications for these patients
+      // Get medications for these patients with medication details
       const { data: meds } = await (supabase as any)
         .from("patient_medications")
-        .select("id, patient_id, dosage, frequency, status, quantity_remaining, total_quantity, medication_id")
+        .select("id, patient_id, dosage, frequency, status, quantity_remaining, total_quantity, medications(name)")
         .in("patient_id", patientIds);
-
-      // Get medication details separately
-      const medIds = [...new Set((meds || []).map((m: any) => m.medication_id))] as string[];
-      const { data: medDetails } = await supabase
-        .from("medications")
-        .select("id, name")
-        .in("id", medIds);
-
-      // Create a map for quick lookup
-      const medIdToName = new Map();
-      (medDetails || []).forEach((m: any) => {
-        medIdToName.set(m.id, m.name || "Unknown");
-      });
 
       const patientsMap: PatientWithMeds[] = (patientProfiles || []).map((p) => ({
         patient_id: p.id,
@@ -111,7 +98,7 @@ const PharmacistDashboard = () => {
           .filter((m: any) => m.patient_id === p.id)
           .map((m: any) => ({
             id: m.id,
-            medication_name: medIdToName.get(m.medication_id) || "Unknown",
+            medication_name: m.medications?.name || "Unknown",
             dosage: m.dosage,
             frequency: m.frequency,
             status: m.status,
@@ -195,13 +182,26 @@ const PharmacistDashboard = () => {
       const startDate = new Date();
       startDate.setDate(startDate.getDate() - daysAgo);
 
-      // Get reminder logs for this patient
-      const { data: logs } = await (supabase as any)
+      // Get reminder logs with related patient medications and medication names
+      const { data: logs, error } = await (supabase as any)
         .from("reminder_logs")
-        .select("id, medication_id, scheduled_time, actual_time, status, notes, created_at")
+        .select(`
+          id,
+          medication_id,
+          scheduled_time,
+          actual_time,
+          status,
+          notes,
+          created_at,
+          patient_medications(id, dosage, medication_id, medications(id, name))
+        `)
         .eq("patient_id", patientId)
         .gte("scheduled_time", startDate.toISOString())
         .order("scheduled_time", { ascending: false });
+
+      if (error) {
+        console.error("Error fetching logs:", error);
+      }
 
       if (!logs || logs.length === 0) {
         setReportData([]);
@@ -209,41 +209,17 @@ const PharmacistDashboard = () => {
         return;
       }
 
-      // Get medication details
-      const medicationIds = [...new Set(logs.map((l: any) => l.medication_id))];
-      
-      // First get patient medication records
-      const { data: patientMeds } = await (supabase as any)
-        .from("patient_medications")
-        .select("id, medication_id, dosage")
-        .in("id", medicationIds);
-
-      // Then get the medication names from medications table
-      const medIds = [...new Set((patientMeds || []).map((m: any) => m.medication_id))] as string[];
-      const { data: medsData } = await supabase
-        .from("medications")
-        .select("id, name")
-        .in("id", medIds);
-
-      // Create maps for quick lookup
-      const patientMedMap = new Map();
-      (patientMeds || []).forEach((med: any) => {
-        patientMedMap.set(med.id, med);
-      });
-
-      const medNameMap = new Map();
-      (medsData || []).forEach((med: any) => {
-        medNameMap.set(med.id, med.name);
-      });
-
       // Combine data
       const formattedLogs = (logs || []).map((log: any) => {
-        const patientMed = patientMedMap.get(log.medication_id);
-        const medId = patientMed?.medication_id;
+        const patientMed = log.patient_medications;
+        const medication = patientMed?.medications;
+        const medName = medication?.name || "Unknown";
+        const dosage = patientMed?.dosage || "";
+
         return {
           ...log,
-          medication_name: medNameMap.get(medId) || "Unknown",
-          dosage: patientMed?.dosage || "",
+          medication_name: medName,
+          dosage: dosage,
           scheduled_date: new Date(log.scheduled_time).toLocaleDateString(),
           scheduled_time: new Date(log.scheduled_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           actual_time: log.actual_time ? new Date(log.actual_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null,
