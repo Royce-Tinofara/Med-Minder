@@ -13,6 +13,13 @@ import {
   CheckCircle2,
   XCircle,
   UserPlus,
+  FileText,
+  Calendar,
+  BarChart3,
+  ArrowLeft,
+  Download,
+  TrendingUp,
+  TrendingDown,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -66,6 +73,10 @@ const CaregiverDashboard = () => {
   const [addMedPatientId, setAddMedPatientId] = useState<string | null>(null);
   const [addPatientOpen, setAddPatientOpen] = useState(false);
   const [newPatientUsername, setNewPatientUsername] = useState("");
+  const [showReports, setShowReports] = useState(false);
+  const [reportData, setReportData] = useState<any[]>([]);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportDateRange, setReportDateRange] = useState<"7" | "30" | "90">("30");
 
   const fetchData = useCallback(async () => {
     if (!profile?.id) return;
@@ -213,6 +224,67 @@ const CaregiverDashboard = () => {
     }
   };
 
+  // Fetch patient reports
+  const fetchPatientReports = async (patientId: string) => {
+    setReportLoading(true);
+    try {
+      const daysAgo = parseInt(reportDateRange);
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - daysAgo);
+
+      // Get reminder logs for this patient
+      const { data: logs } = await (supabase as any)
+        .from("reminder_logs")
+        .select("id, medication_id, scheduled_time, actual_time, status, notes, created_at")
+        .eq("patient_id", patientId)
+        .gte("scheduled_time", startDate.toISOString())
+        .order("scheduled_time", { ascending: false });
+
+
+      if (!logs || logs.length === 0) {
+        setReportData([]);
+        setReportLoading(false);
+        return;
+      }
+
+      // Get medication details
+      const medicationIds = [...new Set(logs.map((l: any) => l.medication_id))];
+      const { data: medsData } = await (supabase as any)
+        .from("patient_medications")
+        .select("id, medications(name, dosage)")
+        .in("id", medicationIds);
+
+      const medsMap = new Map();
+      (medsData || []).forEach((med: any) => {
+        medsMap.set(med.id, med.medications);
+      });
+
+
+      // Combine data
+      const formattedLogs = (logs || []).map((log: any) => ({
+        ...log,
+        medication_name: medsMap.get(log.medication_id)?.name || "Unknown",
+        dosage: medsMap.get(log.medication_id)?.dosage || "",
+        scheduled_date: new Date(log.scheduled_time).toLocaleDateString(),
+        scheduled_time: new Date(log.scheduled_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        actual_time: log.actual_time ? new Date(log.actual_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null,
+      }));
+
+      setReportData(formattedLogs);
+    } catch (err) {
+      console.error("Error fetching reports:", err);
+      toast.error("Failed to load reports");
+    } finally {
+      setReportLoading(false);
+    }
+  };
+
+  const handleViewReports = (patientId: string) => {
+    setSelectedPatient(patientId);
+    setShowReports(true);
+    fetchPatientReports(patientId);
+  };
+
   const filtered = patients.filter(
     (p) =>
       p.first_name.toLowerCase().includes(search.toLowerCase()) ||
@@ -305,6 +377,17 @@ const CaregiverDashboard = () => {
 
               {selectedPatient === patient.patient_id && (
                 <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} className="border-t border-white/[0.04] px-4 pb-4">
+                  {/* Action Buttons */}
+                  <div className="mt-3 flex gap-2">
+                    <button
+                      onClick={() => handleViewReports(patient.patient_id)}
+                      className="flex flex-1 items-center justify-center gap-2 rounded-xl py-2.5 text-xs font-semibold text-primary-foreground"
+                      style={{ background: "var(--gradient-primary)" }}
+                    >
+                      <FileText className="h-3.5 w-3.5" /> View Reports
+                    </button>
+                  </div>
+
                   {/* Medications */}
                   <div className="mt-3 flex items-center justify-between">
                     <p className="text-xs font-medium text-muted-foreground">Medications</p>
@@ -398,6 +481,109 @@ const CaregiverDashboard = () => {
               >
                 Add Patient
               </button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+
+      {/* Patient Reports Modal */}
+      {showReports && selectedPatient && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+          onClick={() => setShowReports(false)}
+        >
+          <motion.div
+            initial={{ scale: 0.9 }}
+            animate={{ scale: 1 }}
+            onClick={(e) => e.stopPropagation()}
+            className="h-[80vh] w-full max-w-4xl rounded-2xl border border-white/[0.08] bg-card m-4 flex flex-col"
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-white/[0.08] p-4">
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setShowReports(false)}
+                  className="rounded-lg p-2 hover:bg-white/[0.08]"
+                >
+                  <ArrowLeft className="h-5 w-5" />
+                </button>
+                <div>
+                  <h3 className="font-display text-lg font-bold">Patient Reports</h3>
+                  <p className="text-xs text-muted-foreground">View medication adherence history</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <select
+                  value={reportDateRange}
+                  onChange={(e) => { setReportDateRange(e.target.value as any); fetchPatientReports(selectedPatient); }}
+                  className="glass-input rounded-lg px-3 py-2 text-sm"
+                >
+                  <option value="7">Last 7 days</option>
+                  <option value="30">Last 30 days</option>
+                  <option value="90">Last 90 days</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Stats */}
+            <div className="grid grid-cols-4 gap-3 border-b border-white/[0.08] p-4">
+              <div className="text-center">
+                <p className="font-display text-2xl font-bold">{reportData.filter(r => r.status === 'taken' || r.status === 'late').length}</p>
+                <p className="text-xs text-muted-foreground">Taken</p>
+              </div>
+              <div className="text-center">
+                <p className="font-display text-2xl font-bold text-destructive">{reportData.filter(r => r.status === 'missed').length}</p>
+                <p className="text-xs text-muted-foreground">Missed</p>
+              </div>
+              <div className="text-center">
+                <p className="font-display text-2xl font-bold text-warning">{reportData.filter(r => r.status === 'pending').length}</p>
+                <p className="text-xs text-muted-foreground">Pending</p>
+              </div>
+              <div className="text-center">
+                <p className="font-display text-2xl font-bold">
+                  {reportData.length > 0 
+                    ? Math.round((reportData.filter(r => r.status === 'taken' || r.status === 'late').length / reportData.length) * 100)
+                    : 0}%
+                </p>
+                <p className="text-xs text-muted-foreground">Adherence</p>
+              </div>
+            </div>
+
+            {/* Report List */}
+            <div className="flex-1 overflow-y-auto p-4">
+              {reportLoading ? (
+                <div className="flex h-full items-center justify-center">
+                  <p className="text-muted-foreground">Loading reports...</p>
+                </div>
+              ) : reportData.length === 0 ? (
+                <div className="flex h-full items-center justify-center">
+                  <p className="text-muted-foreground">No data available for selected period</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {reportData.map((log: any) => (
+                    <div key={log.id} className="flex items-center gap-3 rounded-xl border border-white/[0.04] bg-white/[0.02] p-3">
+                      {log.status === 'taken' && <CheckCircle2 className="h-5 w-5 text-success" />}
+                      {log.status === 'late' && <Clock className="h-5 w-5 text-orange-500" />}
+                      {log.status === 'missed' && <XCircle className="h-5 w-5 text-destructive" />}
+                      {log.status === 'pending' && <Clock className="h-5 w-5 text-warning" />}
+                      <div className="flex-1">
+                        <p className="text-sm font-medium">{log.medication_name}</p>
+                        <p className="text-xs text-muted-foreground">{log.dosage}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs">{log.scheduled_date}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {log.actual_time ? `${log.actual_time} (${log.status})` : log.scheduled_time}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </motion.div>
         </motion.div>

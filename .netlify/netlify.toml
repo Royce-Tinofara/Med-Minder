@@ -7,10 +7,8 @@ redirects = []
 [functions."*"]
 
 [build]
-publish = "c:\\Users\\royce\\Desktop\\medication-guardian-main\\dist"
-publishOrigin = "ui"
-commandOrigin = "ui"
-command = "vite build"
+publish = "c:\\Users\\royce\\Desktop\\medication-guardian-main"
+publishOrigin = "default"
 
 [build.environment]
 
