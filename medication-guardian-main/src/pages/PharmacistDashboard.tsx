@@ -211,25 +211,44 @@ const PharmacistDashboard = () => {
 
       // Get medication details
       const medicationIds = [...new Set(logs.map((l: any) => l.medication_id))];
-      const { data: medsData } = await (supabase as any)
+      
+      // First get patient medication records
+      const { data: patientMeds } = await (supabase as any)
         .from("patient_medications")
-        .select("id, medications(name, dosage)")
+        .select("id, medication_id, dosage")
         .in("id", medicationIds);
 
-      const medsMap = new Map();
+      // Then get the medication names from medications table
+      const medIds = [...new Set((patientMeds || []).map((m: any) => m.medication_id))] as string[];
+      const { data: medsData } = await supabase
+        .from("medications")
+        .select("id, name")
+        .in("id", medIds);
+
+      // Create maps for quick lookup
+      const patientMedMap = new Map();
+      (patientMeds || []).forEach((med: any) => {
+        patientMedMap.set(med.id, med);
+      });
+
+      const medNameMap = new Map();
       (medsData || []).forEach((med: any) => {
-        medsMap.set(med.id, med.medications);
+        medNameMap.set(med.id, med.name);
       });
 
       // Combine data
-      const formattedLogs = (logs || []).map((log: any) => ({
-        ...log,
-        medication_name: medsMap.get(log.medication_id)?.name || "Unknown",
-        dosage: medsMap.get(log.medication_id)?.dosage || "",
-        scheduled_date: new Date(log.scheduled_time).toLocaleDateString(),
-        scheduled_time: new Date(log.scheduled_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        actual_time: log.actual_time ? new Date(log.actual_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null,
-      }));
+      const formattedLogs = (logs || []).map((log: any) => {
+        const patientMed = patientMedMap.get(log.medication_id);
+        const medId = patientMed?.medication_id;
+        return {
+          ...log,
+          medication_name: medNameMap.get(medId) || "Unknown",
+          dosage: patientMed?.dosage || "",
+          scheduled_date: new Date(log.scheduled_time).toLocaleDateString(),
+          scheduled_time: new Date(log.scheduled_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          actual_time: log.actual_time ? new Date(log.actual_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null,
+        };
+      });
 
       setReportData(formattedLogs);
     } catch (err) {
