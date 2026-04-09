@@ -81,6 +81,7 @@ const AddMedicationDialog = ({ open, onOpenChange, patientId, onSuccess }: AddMe
         prescriber_name: prescriberName,
         pharmacy_name: pharmacyDetails || pharmacyName,
         status: "active",
+        created_by: profile?.first_name ? `${profile.first_name} ${profile.last_name || ''}`.trim() : "Patient",
       });
 
       if (error) {

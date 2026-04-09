@@ -19,6 +19,7 @@ import { toast } from "sonner";
 import { format, parseISO, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isSameMonth } from "date-fns";
 import * as XLSX from "xlsx";
 import { jsPDF } from "jspdf";
+import medMinderLogo from "@/../public/masked-icon.svg";
 
 interface ReminderLog {
   id: string;
@@ -185,11 +186,19 @@ const Reports = () => {
   // Export to PDF
   const exportToPDF = () => {
     const doc = new jsPDF();
+    
+    // Add logo
+    try {
+      doc.addImage(medMinderLogo, 'PNG', 14, 10, 20, 20);
+    } catch (e) {
+      console.log('Logo not loaded, skipping');
+    }
+    
     doc.setFontSize(18);
-    doc.text("Medication Report", 14, 20);
+    doc.text("Medication Report", 40, 22);
     doc.setFontSize(10);
-    doc.text(`Month: ${format(selectedMonth, "MMMM yyyy")}`, 14, 30);
-    doc.text(`Generated: ${format(new Date(), "yyyy-MM-dd HH:mm")}`, 14, 36);
+    doc.text(`Month: ${format(selectedMonth, "MMMM yyyy")}`, 14, 40);
+    doc.text(`Generated: ${format(new Date(), "yyyy-MM-dd HH:mm")}`, 14, 46);
 
     let yPos = 50;
     const pageHeight = doc.internal.pageSize.height;

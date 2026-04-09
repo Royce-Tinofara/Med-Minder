@@ -4,6 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from "react-router-dom";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
+import { ThemeProvider } from "./contexts/ThemeContext";
 import AppLayout from "./components/Layout/AppLayout";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
@@ -15,6 +16,7 @@ import Profile from "./pages/Profile";
 import Caregivers from "./pages/Caregivers";
 import PharmacistDashboard from "./pages/PharmacistDashboard";
 import CaregiverDashboard from "./pages/CaregiverDashboard";
+import Chat from "./pages/Chat";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -76,11 +78,12 @@ const PublicOnlyRoute = () => {
 const App = () => {
   return (
     <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <Toaster />
-        <Sonner />
-        <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-          <AuthProvider>
+      <ThemeProvider>
+        <TooltipProvider>
+          <Toaster />
+          <Sonner />
+          <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+            <AuthProvider>
             <Routes>
               {/* Public routes - only accessible when NOT logged in */}
               <Route element={<PublicOnlyRoute />}>
@@ -100,7 +103,7 @@ const App = () => {
                   <Route path="caregivers" element={<Caregivers />} />
                   <Route path="pharmacist" element={<PharmacistDashboard />} />
                   <Route path="caregiver-dashboard" element={<CaregiverDashboard />} />
-                  <Route path="chat" element={<Reminders />} />
+                  <Route path="chat" element={<Chat />} />
                 </Route>
               </Route>
               
@@ -109,7 +112,8 @@ const App = () => {
             </Routes>
           </AuthProvider>
         </BrowserRouter>
-      </TooltipProvider>
+        </TooltipProvider>
+      </ThemeProvider>
     </QueryClientProvider>
   );
 };

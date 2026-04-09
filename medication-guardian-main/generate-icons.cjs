@@ -7,10 +7,10 @@ const publicDir = path.join(__dirname, 'public');
 // Simple blue pill icon as SVG
 const createPillIconSvg = (size) => `
 <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg">
-  <rect width="${size}" height="${size}" rx="${size * 0.15}" fill="#0f172a"/>
-  <rect x="${size * 0.1}" y="${size * 0.25}" width="${size * 0.8}" height="${size * 0.15}" rx="${size * 0.05}" fill="#22c55e"/>
-  <rect x="${size * 0.1}" y="${size * 0.45}" width="${size * 0.8}" height="${size * 0.15}" rx="${size * 0.05}" fill="#ffffff" fill-opacity="0.7"/>
-  <rect x="${size * 0.1}" y="${size * 0.65}" width="${size * 0.8}" height="${size * 0.15}" rx="${size * 0.05}" fill="#ffffff" fill-opacity="0.7"/>
+  <rect x="${size * 0.125}" y="${size * 0.1875}" width="${size * 0.75}" height="${size * 0.625}" rx="${size * 0.3125}" fill="#0f172a"/>
+  <rect x="${size * 0.25}" y="${size * 0.34375}" width="${size * 0.5}" height="${size * 0.0625}" rx="${size * 0.015625}" fill="#22c55e"/>
+  <rect x="${size * 0.25}" y="${size * 0.4375}" width="${size * 0.5}" height="${size * 0.0625}" rx="${size * 0.015625}" fill="#ffffff" fill-opacity="0.7"/>
+  <rect x="${size * 0.25}" y="${size * 0.53125}" width="${size * 0.5}" height="${size * 0.0625}" rx="${size * 0.015625}" fill="#ffffff" fill-opacity="0.7"/>
 </svg>`;
 
 async function generateIcons() {

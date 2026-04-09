@@ -7,12 +7,25 @@ import {
   Clock,
   AlertCircle,
   Trash2,
+  History,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import AddMedicationDialog from "@/components/Medications/AddMedicationDialog";
+import medMinderLogo from "@/../public/masked-icon.svg";
+
+interface MedicationHistory {
+  id: string;
+  action: string;
+  performed_by: string | null;
+  performed_at: string;
+  details: any;
+  previous_quantity: number | null;
+  new_quantity: number | null;
+  medication_name?: string;
+}
 
 interface Medication {
   id: string;
@@ -40,12 +53,15 @@ const item = {
 };
 
 const Medications = () => {
-  const { userId } = useAuth();
+  const { userId, profile } = useAuth();
   const [medications, setMedications] = useState<Medication[]>([]);
+  const [history, setHistory] = useState<MedicationHistory[]>([]);
   const [loading, setLoading] = useState(true);
+  const [historyLoading, setHistoryLoading] = useState(true);
   const [filter, setFilter] = useState<"all" | "active" | "low">("all");
   const [addMedOpen, setAddMedOpen] = useState(false);
   const [requestingRefill, setRequestingRefill] = useState<string | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
 
   const fetchMedications = async () => {
     if (!userId) return;
@@ -97,16 +113,66 @@ const Medications = () => {
     setLoading(false);
   };
 
+  const fetchHistory = async () => {
+    if (!userId) return;
+    setHistoryLoading(true);
+    
+    try {
+      // First get all patient medications for this user
+      const { data: patientMeds } = await supabase
+        .from("patient_medications")
+        .select("id")
+        .eq("patient_id", userId);
+
+      if (!patientMeds || patientMeds.length === 0) {
+        setHistory([]);
+        setHistoryLoading(false);
+        return;
+      }
+
+      const medIds = patientMeds.map(m => m.id);
+
+      // Then get history for those medications
+      const { data, error } = await supabase
+        .from("medication_history")
+        .select(`
+          *,
+          patient_medications(
+            medication_id,
+            medications(name)
+          )
+        `)
+        .in("patient_medication_id", medIds)
+        .order("performed_at", { ascending: false });
+
+      if (error) {
+        console.error("Error fetching history:", error);
+        setHistory([]);
+      } else {
+        const mappedHistory = (data || []).map((h: any) => ({
+          ...h,
+          medication_name: h.patient_medications?.medications?.name || "Unknown",
+        }));
+        setHistory(mappedHistory);
+      }
+    } catch (err) {
+      console.error("Error in fetchHistory:", err);
+      setHistory([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchMedications();
+    fetchHistory();
   }, [userId]);
 
-  const handleRequestRefill = async (medicationId: string) => {
+  const handleRequestRefill = async (medicationId: string, medicationName: string, quantity: number) => {
     if (!userId) return;
     setRequestingRefill(medicationId);
 
     try {
-      // Check if there's already a pending refill request
       const { data: existing } = await supabase
         .from("refill_requests")
         .select("id")
@@ -126,12 +192,14 @@ const Medications = () => {
         patient_medication_id: medicationId,
         requested_by: userId,
         status: "pending",
+        medication_name: medicationName,
+        quantity: quantity,
       });
 
       if (error) {
         toast.error("Failed to request refill: " + error.message);
       } else {
-        toast.success("Refill request submitted successfully!");
+        toast.success(`Refill request submitted for ${medicationName} (${quantity} units)`);
       }
     } catch (err) {
       toast.error("An error occurred while requesting refill");
@@ -141,45 +209,101 @@ const Medications = () => {
   };
 
   const handleDeleteMedication = async (medicationId: string, medicationName: string) => {
+    if (profile?.role === "caregiver" || profile?.role === "pharmacist") {
+      const confirmed = window.confirm(
+        `Are you sure you want to delete ${medicationName}? This will remove all reminders for this medication.`
+      );
+      if (!confirmed) return;
+
+      try {
+        const { error } = await supabase
+          .from("patient_medications")
+          .delete()
+          .eq("id", medicationId);
+
+        if (error) {
+          toast.error("Failed to delete medication: " + error.message);
+          return;
+        }
+
+        toast.success(`${medicationName} deleted!`);
+        fetchMedications();
+        fetchHistory();
+      } catch (err) {
+        toast.error("Failed to delete medication");
+      }
+      return;
+    }
+
     const confirmed = window.confirm(
-      `Are you sure you want to delete ${medicationName}? This will remove all reminders for this medication.`
+      `Your request to delete ${medicationName} will be sent to your caregiver and pharmacist for approval.`
     );
     if (!confirmed) return;
 
     try {
-      const { error } = await supabase
-        .from("patient_medications")
-        .delete()
-        .eq("id", medicationId);
+      const { data: patientAssignments } = await supabase
+        .from("patient_assignments")
+        .select("assigned_user_id, assignment_role")
+        .eq("patient_id", userId);
 
-      if (error) {
-        toast.error("Failed to delete medication: " + error.message);
+      if (!patientAssignments || patientAssignments.length === 0) {
+        toast.error("No caregiver or pharmacist assigned to send request to");
         return;
       }
 
-      toast.success(`${medicationName} deleted!`);
-      fetchMedications();
+      const caregiversAndPharmacists = patientAssignments.filter(
+        (a) => a.assignment_role === "caregiver" || a.assignment_role === "pharmacist"
+      );
+
+      if (caregiversAndPharmacists.length === 0) {
+        toast.error("No caregiver or pharmacist assigned to send request to");
+        return;
+      }
+
+      const recipientIds = caregiversAndPharmacists.map((a) => a.assigned_user_id);
+      
+      const messages = recipientIds.map((recipientId) => ({
+        sender_id: userId,
+        recipient_id: recipientId,
+        patient_id: userId,
+        content: `Request to delete medication: ${medicationName}`,
+        type: "delete_request",
+        related_id: medicationId,
+      }));
+
+      const { error } = await supabase.from("messages").insert(messages);
+
+      if (error) {
+        toast.error("Failed to send delete request: " + error.message);
+        return;
+      }
+
+      toast.success(`Delete request for ${medicationName} sent to caregiver and pharmacist`);
     } catch (err) {
-      toast.error("Failed to delete medication");
+      toast.error("Failed to send delete request");
     }
   };
 
   const filtered = medications.filter((med) => {
     if (filter === "active") return med.status === "active";
-    if (filter === "low") return med.remainingQty / med.totalQty < 0.2;
+    if (filter === "low") return med.totalQty > 0 && med.remainingQty / med.totalQty < 0.2;
     return true;
   });
 
   const activeCount = medications.filter(m => m.status === "active").length;
+  const lowSupplyCount = medications.filter(m => m.totalQty > 0 && m.remainingQty / m.totalQty < 0.2).length;
 
   return (
     <motion.div variants={container} initial="hidden" animate="show" className="space-y-6">
       <motion.div variants={item} className="flex items-center justify-between">
-        <div>
-          <h1 className="font-display text-2xl font-bold">Medications</h1>
-          <p className="text-sm text-muted-foreground">
-            {loading ? "Loading..." : `${activeCount} active medications`}
-          </p>
+        <div className="flex items-center gap-3">
+          <img src={medMinderLogo} alt="Med-Minder" className="h-10 w-10 rounded-xl" />
+          <div>
+            <h1 className="font-display text-2xl font-bold">Medications</h1>
+            <p className="text-sm text-muted-foreground">
+              {loading ? "Loading..." : `${activeCount} active medications`}
+            </p>
+          </div>
         </div>
         <button
           onClick={() => setAddMedOpen(true)}
@@ -188,6 +312,14 @@ const Medications = () => {
         >
           <Plus className="h-4 w-4" /> Add
         </button>
+        {medications.length > 0 && (
+          <button
+            onClick={() => setShowHistory(true)}
+            className="flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-muted-foreground hover:text-foreground border border-white/[0.08] bg-white/[0.03]"
+          >
+            <History className="h-4 w-4" /> History
+          </button>
+        )}
       </motion.div>
 
       {/* Filters */}
@@ -198,7 +330,7 @@ const Medications = () => {
             onClick={() => setFilter(f)}
             className={`nav-pill ${filter === f ? "active" : ""}`}
           >
-            {f === "low" ? "Low Supply" : f.charAt(0).toUpperCase() + f.slice(1)}
+            {f === "low" ? `Low Supply (${lowSupplyCount})` : f.charAt(0).toUpperCase() + f.slice(1)}
           </button>
         ))}
       </motion.div>
@@ -292,10 +424,10 @@ const Medications = () => {
                       onClick={() => handleDeleteMedication(med.id, med.name)}
                       className="flex items-center gap-1 text-xs font-medium text-destructive hover:underline"
                     >
-                      <Trash2 className="h-3 w-3" /> Delete
+                      <Trash2 className="h-3 w-3" /> {profile?.role === "patient" ? "Request Delete" : "Delete"}
                     </button>
                     <button 
-                      onClick={() => handleRequestRefill(med.id)}
+                      onClick={() => handleRequestRefill(med.id, med.name, med.totalQty)}
                       disabled={requestingRefill === med.id || med.refillsLeft === 0}
                       className="flex items-center gap-1 text-xs font-medium text-primary hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
                     >
@@ -314,8 +446,72 @@ const Medications = () => {
         open={addMedOpen}
         onOpenChange={setAddMedOpen}
         patientId={userId}
-        onSuccess={fetchMedications}
+        onSuccess={() => {
+          fetchMedications();
+          fetchHistory();
+        }}
       />
+
+      {/* Medication History Section */}
+      {showHistory && (
+        <motion.div 
+          variants={item}
+          className="glass-card p-4"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+        >
+          <div className="mb-4 flex items-center justify-between">
+            <h3 className="font-display text-lg font-semibold flex items-center gap-2">
+              <History className="h-5 w-5" /> Medication History
+            </h3>
+            <button 
+              onClick={() => setShowHistory(false)}
+              className="text-sm text-muted-foreground hover:text-foreground"
+            >
+              Close
+            </button>
+          </div>
+          
+          {historyLoading ? (
+            <div className="text-center py-4 text-muted-foreground">Loading history...</div>
+          ) : history.length === 0 ? (
+            <div className="text-center py-4 text-muted-foreground">
+              No medication history yet
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {history.map((h) => (
+                <div 
+                  key={h.id} 
+                  className="flex items-center justify-between border-b border-white/[0.04] pb-2 last:border-0"
+                >
+                  <div>
+                    <p className="text-sm font-medium">{h.medication_name || "Unknown Medication"}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {h.action === 'added' && 'Added'}
+                      {h.action === 'deleted' && 'Deleted'}
+                      {h.action === 'supply_depleted' && 'Supply Depleted'}
+                      {h.action === 'refill' && 'Refill Requested'}
+                      {h.action === 'status_changed' && 'Status Changed'}
+                      {h.performed_by && ` by ${h.performed_by}`}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs text-muted-foreground">
+                      {new Date(h.performed_at).toLocaleDateString()}
+                    </p>
+                    {h.action === 'supply_depleted' && h.performed_at && (
+                      <p className="text-xs text-warning">
+                        Depleted: {new Date(h.performed_at).toLocaleDateString()}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </motion.div>
+      )}
     </motion.div>
   );
 };

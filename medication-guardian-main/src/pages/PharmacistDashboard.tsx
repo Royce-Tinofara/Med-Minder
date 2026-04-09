@@ -13,11 +13,13 @@ import {
   Clock,
   CheckCircle2,
   XCircle,
+  MessageCircle,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import AddMedicationDialog from "@/components/Medications/AddMedicationDialog";
+import Chat from "./Chat";
 
 interface PatientWithMeds {
   patient_id: string;
@@ -57,6 +59,7 @@ const PharmacistDashboard = () => {
   const [reportData, setReportData] = useState<any[]>([]);
   const [reportLoading, setReportLoading] = useState(false);
   const [reportDateRange, setReportDateRange] = useState<"7" | "30" | "90">("30");
+  const [showChat, setShowChat] = useState(false);
 
   const fetchPatients = useCallback(async () => {
     if (!profile?.id) return;
@@ -267,14 +270,22 @@ const PharmacistDashboard = () => {
       </motion.div>
 
       {/* Add Patient Button */}
-      <motion.div variants={item}>
+      <motion.div variants={item} className="flex gap-2">
         <button
           onClick={() => setAddPatientOpen(true)}
-          className="flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold text-primary-foreground transition-transform hover:scale-[1.02]"
+          className="flex flex-1 items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold text-primary-foreground transition-transform hover:scale-[1.02]"
           style={{ background: "var(--gradient-accent)" }}
         >
           <UserPlus className="h-4 w-4" />
           Add Patient
+        </button>
+        <button
+          onClick={() => setShowChat(true)}
+          className="flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold text-primary-foreground transition-transform hover:scale-[1.02]"
+          style={{ background: "var(--gradient-primary)" }}
+        >
+          <MessageCircle className="h-4 w-4" />
+          Chat
         </button>
       </motion.div>
 
@@ -589,6 +600,41 @@ const PharmacistDashboard = () => {
                   ))}
                 </div>
               )}
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+      {/* Chat Modal */}
+      {showChat && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+          onClick={() => setShowChat(false)}
+        >
+          <motion.div
+            initial={{ scale: 0.9 }}
+            animate={{ scale: 1 }}
+            onClick={(e) => e.stopPropagation()}
+            className="h-[80vh] w-full max-w-4xl rounded-2xl border border-white/[0.08] bg-card m-4 flex flex-col overflow-hidden"
+          >
+            <div className="flex items-center justify-between border-b border-white/[0.08] p-4">
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setShowChat(false)}
+                  className="rounded-lg p-2 hover:bg-white/[0.08]"
+                >
+                  <ArrowLeft className="h-5 w-5" />
+                </button>
+                <div>
+                  <h3 className="font-display text-lg font-bold">Patient Chat</h3>
+                  <p className="text-xs text-muted-foreground">Message your patients</p>
+                </div>
+              </div>
+            </div>
+            <div className="flex-1 overflow-hidden">
+              <Chat />
             </div>
           </motion.div>
         </motion.div>

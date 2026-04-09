@@ -20,11 +20,16 @@ import {
   Download,
   TrendingUp,
   TrendingDown,
+  FileSpreadsheet,
+  MessageCircle,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import AddMedicationDialog from "@/components/Medications/AddMedicationDialog";
+import Chat from "./Chat";
 import { toast } from "sonner";
+import * as XLSX from "xlsx";
+import { jsPDF } from "jspdf";
 
 interface PatientData {
   patient_id: string;
@@ -77,6 +82,7 @@ const CaregiverDashboard = () => {
   const [reportData, setReportData] = useState<any[]>([]);
   const [reportLoading, setReportLoading] = useState(false);
   const [reportDateRange, setReportDateRange] = useState<"7" | "30" | "90">("30");
+  const [showChat, setShowChat] = useState(false);
 
   const fetchData = useCallback(async () => {
     if (!profile?.id) return;
@@ -274,6 +280,95 @@ const CaregiverDashboard = () => {
     fetchPatientReports(patientId);
   };
 
+  const exportToExcel = () => {
+    if (reportData.length === 0) {
+      toast.error("No data to export");
+      return;
+    }
+
+    const patient = patients.find((p) => p.patient_id === selectedPatient);
+    const exportData = reportData.map((log: any) => ({
+      "Medication": log.medication_name,
+      "Dosage": log.dosage,
+      "Date": log.scheduled_date,
+      "Scheduled Time": log.scheduled_time,
+      "Actual Time": log.actual_time || "-",
+      "Status": log.status,
+      "Notes": log.notes || "-",
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Report");
+    XLSX.writeFile(wb, `${patient?.first_name}_${patient?.last_name}_report_${new Date().toISOString().split('T')[0]}.xlsx`);
+    toast.success("Report exported to Excel");
+  };
+
+  const exportToPDF = () => {
+    if (reportData.length === 0) {
+      toast.error("No data to export");
+      return;
+    }
+
+    const patient = patients.find((p) => p.patient_id === selectedPatient);
+    const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    let yPosition = 20;
+
+    // Header
+    doc.setFontSize(20);
+    doc.text("Medication Adherence Report", pageWidth / 2, yPosition, { align: "center" });
+    yPosition += 10;
+
+    // Patient info
+    doc.setFontSize(12);
+    doc.text(`Patient: ${patient?.first_name} ${patient?.last_name}`, 20, yPosition);
+    yPosition += 7;
+    doc.text(`Generated: ${new Date().toLocaleDateString()}`, 20, yPosition);
+    yPosition += 7;
+
+    // Stats
+    const taken = reportData.filter((r: any) => r.status === 'taken' || r.status === 'late').length;
+    const missed = reportData.filter((r: any) => r.status === 'missed').length;
+    const pending = reportData.filter((r: any) => r.status === 'pending').length;
+    const adherence = reportData.length > 0 ? Math.round((taken / reportData.length) * 100) : 0;
+
+    doc.setFontSize(10);
+    doc.text(`Total Records: ${reportData.length} | Taken: ${taken} | Missed: ${missed} | Pending: ${pending} | Adherence: ${adherence}%`, 20, yPosition);
+    yPosition += 10;
+
+    // Table
+    const tableData = reportData.map((log: any) => [
+      log.medication_name,
+      log.dosage,
+      log.scheduled_date,
+      log.scheduled_time,
+      log.actual_time || "-",
+      log.status,
+    ]);
+
+    (doc as any).autoTable({
+      head: [["Medication", "Dosage", "Date", "Scheduled", "Actual", "Status"]],
+      body: tableData,
+      startY: yPosition,
+      didDrawPage: (data: any) => {
+        // Footer
+        const pageCount = (doc as any).internal.getNumberOfPages();
+        doc.setFontSize(10);
+        doc.text(
+          `Page ${data.pageNumber} of ${pageCount}`,
+          pageWidth / 2,
+          pageHeight - 10,
+          { align: "center" }
+        );
+      },
+    });
+
+    doc.save(`${patient?.first_name}_${patient?.last_name}_report_${new Date().toISOString().split('T')[0]}.pdf`);
+    toast.success("Report exported to PDF");
+  };
+
   const filtered = patients.filter(
     (p) =>
       p.first_name.toLowerCase().includes(search.toLowerCase()) ||
@@ -295,14 +390,22 @@ const CaregiverDashboard = () => {
       </motion.div>
 
       {/* Add Patient Button */}
-      <motion.div variants={item}>
+      <motion.div variants={item} className="flex gap-2">
         <button
           onClick={() => setAddPatientOpen(true)}
-          className="flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold text-primary-foreground transition-transform hover:scale-[1.02]"
+          className="flex flex-1 items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold text-primary-foreground transition-transform hover:scale-[1.02]"
           style={{ background: "var(--gradient-primary)" }}
         >
           <UserPlus className="h-4 w-4" />
           Add Patient
+        </button>
+        <button
+          onClick={() => setShowChat(true)}
+          className="flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold text-primary-foreground transition-transform hover:scale-[1.02]"
+          style={{ background: "var(--gradient-accent)" }}
+        >
+          <MessageCircle className="h-4 w-4" />
+          Chat
         </button>
       </motion.div>
 
@@ -514,6 +617,22 @@ const CaregiverDashboard = () => {
                   <option value="30">Last 30 days</option>
                   <option value="90">Last 90 days</option>
                 </select>
+                <button
+                  onClick={exportToExcel}
+                  disabled={reportData.length === 0}
+                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-primary-foreground bg-accent hover:bg-accent/90 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <FileSpreadsheet className="h-4 w-4" />
+                  Excel
+                </button>
+                <button
+                  onClick={exportToPDF}
+                  disabled={reportData.length === 0}
+                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-primary-foreground bg-primary hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Download className="h-4 w-4" />
+                  PDF
+                </button>
               </div>
             </div>
 
@@ -573,6 +692,41 @@ const CaregiverDashboard = () => {
                   ))}
                 </div>
               )}
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+      {/* Chat Modal */}
+      {showChat && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+          onClick={() => setShowChat(false)}
+        >
+          <motion.div
+            initial={{ scale: 0.9 }}
+            animate={{ scale: 1 }}
+            onClick={(e) => e.stopPropagation()}
+            className="h-[80vh] w-full max-w-4xl rounded-2xl border border-white/[0.08] bg-card m-4 flex flex-col overflow-hidden"
+          >
+            <div className="flex items-center justify-between border-b border-white/[0.08] p-4">
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setShowChat(false)}
+                  className="rounded-lg p-2 hover:bg-white/[0.08]"
+                >
+                  <ArrowLeft className="h-5 w-5" />
+                </button>
+                <div>
+                  <h3 className="font-display text-lg font-bold">Patient Chat</h3>
+                  <p className="text-xs text-muted-foreground">Message your patients</p>
+                </div>
+              </div>
+            </div>
+            <div className="flex-1 overflow-hidden">
+              <Chat />
             </div>
           </motion.div>
         </motion.div>

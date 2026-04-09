@@ -1,8 +1,10 @@
 import { useEffect, useState, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { MessageCircle, X, Send, User, Pill, RefreshCw } from "lucide-react";
+import { MessageCircle, X, Send, User, Pill, RefreshCw, Bell } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { toast } from "sonner";
+import { playNotificationSound, showBrowserNotification, requestNotificationPermission } from "@/utils/notifications";
 
 interface Message {
   id: string;
@@ -19,7 +21,6 @@ interface Message {
 
 interface Caregiver {
   id: string;
-  name: string;
   first_name: string;
   last_name: string;
 }
@@ -32,6 +33,7 @@ const ChatWidget = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [chatTitle, setChatTitle] = useState("Care Team Chat");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -42,6 +44,12 @@ const ChatWidget = () => {
   useEffect(() => {
     if (isOpen && userId) {
       fetchContacts();
+      // Reset unread count when opening chat
+      setUnreadCount(0);
+      // Request notification permission
+      requestNotificationPermission().catch(() => {
+        // Silent fail - user may deny permission
+      });
     }
   }, [isOpen, userId, profile?.role]);
 
@@ -50,14 +58,55 @@ const ChatWidget = () => {
       fetchMessages();
       // Set up real-time subscription
       const channel = supabase
-        .channel('messages')
+        .channel(`messages-${userId}`)
         .on('postgres_changes', {
           event: 'INSERT',
           schema: 'public',
           table: 'messages',
           filter: `recipient_id=eq.${userId}`,
         }, (payload) => {
-          setMessages((prev) => [...prev, payload.new as Message]);
+          const newMsg = payload.new as Message;
+          setMessages((prev) => [...prev, newMsg]);
+          
+          // Play notification sound
+          playNotificationSound();
+          
+          // Show toast notification
+          const senderName = newMsg.sender?.first_name || "Someone";
+          toast.success(`New message from ${senderName}`);
+          
+          // Show browser notification if permitted
+          showBrowserNotification(`New message from ${senderName}`, {
+            body: newMsg.content.substring(0, 100),
+            tag: "medication-chat",
+          });
+        })
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    } else if (selectedCaregiver && !isOpen) {
+      // Set up subscription to track unread messages when chat is closed
+      const channel = supabase
+        .channel(`messages-unread-${userId}`)
+        .on('postgres_changes', {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `recipient_id=eq.${userId}`,
+        }, (payload) => {
+          // Increment unread count when chat is closed
+          setUnreadCount((prev) => prev + 1);
+          
+          // Still play sound and show notifications
+          playNotificationSound();
+          const newMsg = payload.new as Message;
+          const senderName = newMsg.sender?.first_name || "Someone";
+          showBrowserNotification(`New message from ${senderName}`, {
+            body: newMsg.content.substring(0, 100),
+            tag: "medication-chat",
+          });
         })
         .subscribe();
 
@@ -78,7 +127,7 @@ const ChatWidget = () => {
     try {
       if (profile.role === "pharmacist") {
         // Pharmacist: get assigned patients
-        const { data: assignments } = await (supabase as any)
+        const { data: assignments } = await supabase
           .from("patient_assignments")
           .select("patient_id")
           .eq("assigned_user_id", userId)
@@ -87,7 +136,31 @@ const ChatWidget = () => {
         if (assignments && assignments.length > 0) {
           const patientIds = assignments.map((a: any) => a.patient_id);
           
-          const { data: patients } = await (supabase as any)
+          const { data: patients } = await supabase
+            .from("users")
+            .select("id, first_name, last_name")
+            .in("id", patientIds);
+
+          if (patients) {
+            setCaregivers(patients);
+            setChatTitle("Patient Chat");
+            if (patients.length > 0 && !selectedCaregiver) {
+              setSelectedCaregiver(patients[0]);
+            }
+          }
+        }
+      } else if (profile.role === "caregiver") {
+        // Caregiver: get assigned patients
+        const { data: assignments } = await supabase
+          .from("patient_assignments")
+          .select("patient_id")
+          .eq("assigned_user_id", userId)
+          .eq("assignment_role", "caregiver");
+
+        if (assignments && assignments.length > 0) {
+          const patientIds = assignments.map((a: any) => a.patient_id);
+          
+          const { data: patients } = await supabase
             .from("users")
             .select("id, first_name, last_name")
             .in("id", patientIds);
@@ -101,8 +174,8 @@ const ChatWidget = () => {
           }
         }
       } else {
-        // Patient or caregiver: get assigned caregivers
-        const { data: assignments } = await (supabase as any)
+        // Patient: get assigned caregivers and pharmacists
+        const { data: assignments } = await supabase
           .from("patient_assignments")
           .select("assigned_user_id")
           .eq("patient_id", userId);
@@ -110,7 +183,7 @@ const ChatWidget = () => {
         if (assignments && assignments.length > 0) {
           const caregiverIds = assignments.map((a: any) => a.assigned_user_id);
           
-          const { data: users } = await (supabase as any)
+          const { data: users } = await supabase
             .from("users")
             .select("id, first_name, last_name")
             .in("id", caregiverIds);
@@ -153,23 +226,33 @@ const ChatWidget = () => {
   const sendMessage = async () => {
     if (!newMessage.trim() || !userId || !selectedCaregiver) return;
 
+    const tempMessage = newMessage;
+    setNewMessage("");
+
     try {
-      const { error } = await (supabase as any)
+      // Determine patient_id based on user role
+      const patientId = isPatient ? userId : selectedCaregiver.id;
+
+      const { error } = await supabase
         .from("messages")
         .insert({
           sender_id: userId,
           recipient_id: selectedCaregiver.id,
-          patient_id: userId,
-          content: newMessage,
+          patient_id: patientId,
+          content: tempMessage,
           type: "message",
         });
 
-      if (!error) {
-        setNewMessage("");
-        fetchMessages();
+      if (error) {
+        console.error("Send error:", error);
+        setNewMessage(tempMessage);
+        return;
       }
+
+      await fetchMessages();
     } catch (err) {
       console.error("Error sending message:", err);
+      setNewMessage(tempMessage);
     }
   };
 
@@ -177,19 +260,25 @@ const ChatWidget = () => {
     if (!userId || !selectedCaregiver) return;
 
     try {
-      const { error } = await (supabase as any)
+      // Determine patient_id based on user role
+      const patientId = isPatient ? userId : selectedCaregiver.id;
+
+      const { error } = await supabase
         .from("messages")
         .insert({
           sender_id: userId,
           recipient_id: selectedCaregiver.id,
-          patient_id: userId,
+          patient_id: patientId,
           content: `Requesting refill for ${medicationName}`,
           type: "refill_request",
         });
 
-      if (!error) {
-        fetchMessages();
+      if (error) {
+        console.error("Refill request error:", error);
+        return;
       }
+
+      await fetchMessages();
     } catch (err) {
       console.error("Error sending refill request:", err);
     }
@@ -213,6 +302,15 @@ const ChatWidget = () => {
         style={{ background: "var(--gradient-accent)" }}
       >
         <MessageCircle className="h-6 w-6 text-white" />
+        {unreadCount > 0 && (
+          <motion.div
+            initial={{ scale: 0 }}
+            animate={{ scale: 1 }}
+            className="absolute -top-2 -right-2 flex h-6 w-6 items-center justify-center rounded-full bg-destructive text-white text-xs font-bold border-2 border-white"
+          >
+            {unreadCount > 9 ? "9+" : unreadCount}
+          </motion.div>
+        )}
       </motion.button>
 
       {/* Chat Window */}

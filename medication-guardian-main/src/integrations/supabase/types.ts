@@ -241,9 +241,11 @@ export type Database = {
         Row: {
           created_at: string
           id: string
+          medication_name: string | null
           notes: string | null
           patient_id: string
           patient_medication_id: string
+          quantity: number | null
           requested_by: string | null
           status: string | null
           updated_at: string
@@ -251,9 +253,11 @@ export type Database = {
         Insert: {
           created_at?: string
           id?: string
+          medication_name?: string | null
           notes?: string | null
           patient_id: string
           patient_medication_id: string
+          quantity?: number | null
           requested_by?: string | null
           status?: string | null
           updated_at?: string
@@ -261,9 +265,11 @@ export type Database = {
         Update: {
           created_at?: string
           id?: string
+          medication_name?: string | null
           notes?: string | null
           patient_id?: string
           patient_medication_id?: string
+          quantity?: number | null
           requested_by?: string | null
           status?: string | null
           updated_at?: string

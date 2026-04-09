@@ -74,8 +74,11 @@ const Register = () => {
         className="w-full max-w-md"
       >
         <div className="mb-8 text-center">
-          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl glow-primary" style={{ background: "var(--gradient-primary)" }}>
-            <span className="font-display text-2xl font-bold text-primary-foreground">M</span>
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-[2rem] glow-primary" style={{ background: "var(--gradient-primary)" }}>
+            <svg width="28" height="20" viewBox="0 0 28 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="14" height="20" rx="10" fill="#ffffff"/>
+              <rect x="14" width="14" height="20" rx="10" fill="#0f172a"/>
+            </svg>
           </div>
           <h1 className="font-display text-3xl font-bold">
             Create Account On <span className="gradient-text-primary">MediMinder</span>
